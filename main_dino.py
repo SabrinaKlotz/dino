@@ -29,6 +29,7 @@ import torch.backends.cudnn as cudnn
 import torch.nn.functional as F
 from torchvision import datasets, transforms
 from torchvision import models as torchvision_models
+import timm
 
 import utils
 import vision_transformer as vits
@@ -43,7 +44,7 @@ def get_args_parser():
 
     # Model parameters
     parser.add_argument('--arch', default='vit_small', type=str,
-        choices=['vit_tiny', 'vit_small', 'vit_base', 'xcit', 'deit_tiny', 'deit_small'] \
+        choices=['vit_tiny', 'vit_small', 'vit_base', 'xcit', 'deit_tiny', 'deit_small', 'uni'] \
                 + torchvision_archs + torch.hub.list("facebookresearch/xcit:main"),
         help="""Name of architecture to train. For quick experiments with ViTs,
         we recommend using vit_tiny or vit_small.""")
@@ -129,6 +130,21 @@ def get_args_parser():
     return parser
 
 
+def freeze_all_but_last_two(model):
+    # Get all transformer blocks
+    transformer_blocks = list(model.blocks.children())
+    
+    # Freeze all blocks except the last two
+    for block in transformer_blocks[:-2]:
+        for param in block.parameters():
+            param.requires_grad = False
+
+    # The last two blocks will remain unfrozen and trainable.
+    # The head is typically also trainable:
+    for param in model.head.parameters():
+        param.requires_grad = True
+
+
 def train_dino(args):
     utils.init_distributed_mode(args)
     utils.fix_random_seeds(args.seed)
@@ -142,16 +158,21 @@ def train_dino(args):
         args.local_crops_scale,
         args.local_crops_number,
     )
-    dataset = datasets.ImageFolder(args.data_path, transform=transform)
-    sampler = torch.utils.data.DistributedSampler(dataset, shuffle=True)
-    data_loader = torch.utils.data.DataLoader(
-        dataset,
-        sampler=sampler,
-        batch_size=args.batch_size_per_gpu,
-        num_workers=args.num_workers,
-        pin_memory=True,
-        drop_last=True,
-    )
+    if args.arch == "uni":
+        dataset = utils.ST_Bag_Dataset(args.data_path, transform)
+        sampler = torch.utils.data.DistributedSampler(dataset, shuffle=True)
+        data_loader = utils.CustomDataloader()
+    else: 
+        dataset = datasets.ImageFolder(args.data_path, transform=transform)
+        sampler = torch.utils.data.DistributedSampler(dataset, shuffle=True)
+        data_loader = torch.utils.data.DataLoader(
+            dataset,
+            sampler=sampler,
+            batch_size=args.batch_size_per_gpu,
+            num_workers=args.num_workers,
+            pin_memory=True,
+            drop_last=True,
+        )
     print(f"Data loaded: there are {len(dataset)} images.")
 
     # ============ building student and teacher networks ... ============
@@ -176,8 +197,21 @@ def train_dino(args):
         student = torchvision_models.__dict__[args.arch]()
         teacher = torchvision_models.__dict__[args.arch]()
         embed_dim = student.fc.weight.shape[1]
+    elif args.arch == "uni":
+        student = timm.create_model(
+                "vit_large_patch16_224", img_size=224, patch_size=16, init_values=1e-5, num_classes=0, dynamic_img_size=True
+            )
+        teacher = timm.create_model(
+                "vit_large_patch16_224", img_size=224, patch_size=16, init_values=1e-5, num_classes=0, dynamic_img_size=True
+            )
+
+        # Freeze all layers except the last two
+        freeze_all_but_last_two(student)
+        freeze_all_but_last_two(teacher)
+
+        embed_dim = student.embed_dim	
     else:
-        print(f"Unknow architecture: {args.arch}")
+        print(f"Unknown architecture: {args.arch}")
 
     # multi-crop wrapper handles forward with inputs of different resolutions
     student = utils.MultiCropWrapper(student, DINOHead(

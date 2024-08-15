@@ -30,7 +30,48 @@ import numpy as np
 import torch
 from torch import nn
 import torch.distributed as dist
-from PIL import ImageFilter, ImageOps
+from PIL import ImageFilter, Image, ImageOps
+from torch.utils.data import Dataset
+import pandas as pd
+import h5py
+import Path
+
+class ST_Bag_Dataset():
+    def __init__(self, data_path, transform=None):
+        self.data_path = Path(data_path)
+        self.images = h5py.File(self.data_path,'r+')["img"] 
+        self.transform = transform
+
+    def __len__(self):
+        return len(self.images)
+    
+    def __getitem__(self, idx):
+        image = self.images[idx]
+        # convert image to PIL
+        image = Image.fromarray(image)
+
+        # image = torch.tensor(image).permute(2, 0, 1).float()
+        if self.transform:
+            image = self.transform(image)
+
+        return {"image": image}
+
+class CustomDataloader(Dataset):
+    def __init__(self, image_paths, transform:list =None):
+        super(CustomDataloader, self).__init__()
+        self.image_paths = image_paths
+        self.transform = transform
+
+    def __len__(self):
+        return len(self.image_paths)
+
+    def __getitem__(self, idx):
+        img = Image.open(self.image_paths[idx])
+
+        if self.transform:
+            img = self.transform(img)
+
+        return img
 
 
 class GaussianBlur(object):
