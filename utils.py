@@ -35,43 +35,42 @@ from torch.utils.data import Dataset
 import pandas as pd
 import h5py
 import Path
+import torchvision.transforms as transforms
 
-class ST_Bag_Dataset():
+class ST_Bag_Dataset(Dataset):
     def __init__(self, data_path, transform=None):
         self.data_path = Path(data_path)
-        self.images = h5py.File(self.data_path,'r+')["img"] 
-        self.transform = transform
-
+        self.transform = transforms.Compose([
+                            transforms.Resize(224),
+                            transforms.ToTensor(),
+                            transforms.Normalize(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225)),
+])
+        
+        self.data_files = {i.split(".")[0]: self.data_path / i for i in os.listdir(self.data_path) if i.split(".")[0] in normal_sample_keys}
+        
+        # Collect all images from all HDF5 files
+        self.image_paths = []
+        for key, file_path in self.data_files.items():
+            with h5py.File(file_path, 'r') as f:
+                images = f["img"]
+                for idx in range(len(images)):
+                    self.image_paths.append((file_path, idx))
+                    
+        print(f"Number of images: {len(self.image_paths)}")
+    
     def __len__(self):
-        return len(self.images)
+        return len(self.image_paths)
     
     def __getitem__(self, idx):
-        image = self.images[idx]
-        # convert image to PIL
+        file_path, img_idx = self.image_paths[idx]
+        with h5py.File(file_path, 'r') as f:
+            image = f["img"][img_idx]
         image = Image.fromarray(image)
 
-        # image = torch.tensor(image).permute(2, 0, 1).float()
         if self.transform:
             image = self.transform(image)
 
         return {"image": image}
-
-class CustomDataloader(Dataset):
-    def __init__(self, image_paths, transform:list =None):
-        super(CustomDataloader, self).__init__()
-        self.image_paths = image_paths
-        self.transform = transform
-
-    def __len__(self):
-        return len(self.image_paths)
-
-    def __getitem__(self, idx):
-        img = Image.open(self.image_paths[idx])
-
-        if self.transform:
-            img = self.transform(img)
-
-        return img
 
 
 class GaussianBlur(object):

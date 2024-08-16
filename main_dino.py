@@ -140,9 +140,7 @@ def freeze_all_but_last_two(model):
             param.requires_grad = False
 
     # The last two blocks will remain unfrozen and trainable.
-    # The head is typically also trainable:
-    for param in model.head.parameters():
-        param.requires_grad = True
+    
 
 
 def train_dino(args):
@@ -161,7 +159,12 @@ def train_dino(args):
     if args.arch == "uni":
         dataset = utils.ST_Bag_Dataset(args.data_path, transform)
         sampler = torch.utils.data.DistributedSampler(dataset, shuffle=True)
-        data_loader = utils.CustomDataloader()
+        data_loader = torch.utils.data.DataLoader(
+            dataset, 
+            batch_size=args.batch_size_per_gpu, 
+            shuffle=True, 
+            num_workers=args.num_workers, 
+            pin_memory=True, drop_last=True)
     else: 
         dataset = datasets.ImageFolder(args.data_path, transform=transform)
         sampler = torch.utils.data.DistributedSampler(dataset, shuffle=True)
