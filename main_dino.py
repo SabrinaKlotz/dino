@@ -139,7 +139,16 @@ def freeze_all_but_last_two(model):
         for param in block.parameters():
             param.requires_grad = False
 
-    # The last two blocks will remain unfrozen and trainable.
+    # Or
+    # freeze all layers first
+    for param in model.parameters():
+        param.requires_grad = False
+
+    # unfreeze the last two layers
+    for i in range(len(model.features) - 2, len(model.features)):
+        for param in model.features[i].parameters():
+            param.requires_grad = True
+
     
 
 
